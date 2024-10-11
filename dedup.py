@@ -95,6 +95,13 @@ def deinterleave_fastq(interleaved, R1, R2):
 
     return cmd
 
+def trim_header(fastq_in, fastq_out):
+    cmd = "python "
+    cmd += "/".join(os.path.abspath(__file__).split("/")[:-1]) + "/" + "strip_fastq_headers.py "
+    cmd += f"{fastq_in} "
+    cmd += f"{fastq_out} "
+
+    return cmd
 def run_commands(cmds):
     # for output in cmd 
     for cmd in cmds:
@@ -156,6 +163,10 @@ def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta)
     interleaved = prefix + "_dedup.fastq"
     read1umi = prefix + "_umi_R1.fastq"
     read2umi = prefix + "_umi_R2.fastq"
+
+    pre_final_out_1 = prefix + "_nonstripped_R1.fastq" # Both of the pre files must have headers edited
+    pre_final_out_2 = prefix + "_nonstripped_R2.fastq"
+
     final_out_1 = output_prefix + "_R1.fastq"
     final_out_2 = output_prefix + "_R2.fastq"
 
@@ -175,7 +186,9 @@ def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta)
     cmds += [collapse_umi(bowtie_bam2, dedup)]
     cmds += [sort_bam(dedup, dedup_by_name, by_name = True)]
     cmds += [bam_to_fastq(dedup_by_name, interleaved)]
-    cmds += [deinterleave_fastq(interleaved, final_out_1, final_out_2)]
+    cmds += [deinterleave_fastq(interleaved, pre_final_out_1, pre_final_out_2)]
+    cmds += [trim_header(pre_final_out_1, final_out_1)]
+    cmds += [trim_header(pre_final_out_2, final_out_2)]
 
     # Run all cmds
     run_commands(cmds)

@@ -91,7 +91,7 @@ def deinterleave_fastq(interleaved, R1, R2):
     cmd += "/".join(os.path.abspath(__file__).split("/")[:-1]) + "/" + "deinterleaver.py "
     cmd += f"{interleaved} "
     cmd += f"{R1} "
-    cmd += f"{R2} "
+    cmd += f"{R2}"
 
     return cmd
 
@@ -99,9 +99,17 @@ def trim_header(fastq_in, fastq_out):
     cmd = "python "
     cmd += "/".join(os.path.abspath(__file__).split("/")[:-1]) + "/" + "strip_fastq_headers.py "
     cmd += f"{fastq_in} "
-    cmd += f"{fastq_out} "
+    cmd += f"{fastq_out}"
 
     return cmd
+
+def copy(f, dest):
+    cmd = "cp "
+    cmd += f"{f} "
+    cmd += f"{dest}"
+
+    return cmd
+
 def run_commands(cmds):
     # for output in cmd 
     for cmd in cmds:
@@ -138,7 +146,7 @@ def handle_exception(error):
         else:
             raise Exception(str(error.stderr))
 
-def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta):
+def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta, disable_header_correction):
     # Ensure R1, R2, fasta exist
     for fl in (R1, R2, fasta):
         if not os.path.exists(fl):
@@ -187,8 +195,17 @@ def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta)
     cmds += [sort_bam(dedup, dedup_by_name, by_name = True)]
     cmds += [bam_to_fastq(dedup_by_name, interleaved)]
     cmds += [deinterleave_fastq(interleaved, pre_final_out_1, pre_final_out_2)]
-    cmds += [trim_header(pre_final_out_1, final_out_1)]
-    cmds += [trim_header(pre_final_out_2, final_out_2)]
+
+    # Prevent header trimming fix.
+    # Necessary to reproduce old results
+    # produced prior to patch.
+    if disable_header_correction:
+        cmds += [copy(pre_final_out_1, final_out_1)]
+        cmds += [copy(pre_final_out_2, final_out_2)]
+
+    else:
+        cmds += [trim_header(pre_final_out_1, final_out_1)]
+        cmds += [trim_header(pre_final_out_2, final_out_2)]
 
     # Run all cmds
     run_commands(cmds)
@@ -228,7 +245,8 @@ if __name__ == "__main__":
     ap.add_argument("--index_fasta", action="store_true", default = False, help = "Index the fasta file. An indexed fasta is required for this script. (Default = False)" )
     ap.add_argument("--temp", default = "temp", help = "Name of temp directory. (default = temp)")
     ap.add_argument("--keep_temp", default=False, action="store_true", help = "Keep the temp files. (Default = False)")
+    ap.add_argument("--disable_header_correction", default=False, action="store_true", help = "Disable removal of \1 and \2 suffix from read headers. Necessary to reproduce deduplication / ShapeMapper results produced prior to introduction of header correction (Default = False)")
     ap.add_argument("-p", default = 8, type = int, help = "Number of processors to align with. (Default = 8)")
     pa = ap.parse_args()
 
-    main(pa.R1, pa.R2, pa.fasta, pa.umi_len, pa.output_prefix, pa.temp, pa.keep_temp, pa.p, pa.index_fasta)
+    main(pa.R1, pa.R2, pa.fasta, pa.umi_len, pa.output_prefix, pa.temp, pa.keep_temp, pa.p, pa.index_fasta, pa.disable_header_correction)

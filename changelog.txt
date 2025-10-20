@@ -1,0 +1,10 @@
+20 October 2025
+
+Fixed minor issue with adding ../ to relative pathing for fasta file.
+
+24 March 2025
+
+Changed so deinterleaver deinterleaves by header suffix (/1 or /2) rather than
+line number.
+
+Changed so unpaired alignments would not be output.

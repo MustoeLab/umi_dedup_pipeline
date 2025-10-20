@@ -9,8 +9,7 @@ with open(sys.argv[1], "r") as deinterleave, \
     for line in deinterleave:
         line_buffer.append(line)
         if len(line_buffer) == 4:
-            read += 1
-            if read % 2 != 0:
+            if line_buffer[0].strip()[-1] == "1":
                 R1.writelines(line_buffer)
             else:
                 R2.writelines(line_buffer)

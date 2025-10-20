@@ -5,7 +5,7 @@ import shutil
 import datetime
 
 def build_fasta_index(fasta, gene):
-    cmd = "bowtie2-build "
+    cmd = "/storage/mustoe/software/shapemapper2.3-release/internals/thirdparty/bowtie2/bowtie2-build "
     cmd += f"-f {fasta} "
     cmd += f"{gene}"
 
@@ -23,7 +23,7 @@ def extract_umis(umi_len, R1, R2, read1umi, read2umi):
     return cmd
 
 def align_reads(gene_name, p, R1, R2, output):
-    cmd = "bowtie2 "
+    cmd = "/storage/mustoe/software/shapemapper2.3-release/internals/thirdparty/bowtie2/bowtie2 "
     cmd += f"-p {p} "
     cmd += "--local "
     cmd += "--sensitive-local "
@@ -34,6 +34,7 @@ def align_reads(gene_name, p, R1, R2, output):
     cmd += "--maxins 800 "
     cmd += "--ignore-quals "
     cmd += "--no-unal "
+    cmd += "--no-mixed "
     cmd += f"-x {gene_name} "
     cmd += f"-1 {R1} "
     cmd += f"-2 {R2} "
@@ -146,6 +147,20 @@ def handle_exception(error):
         else:
             raise Exception(str(error.stderr))
 
+def calc_raw_umi_counts(R1, umi_len):
+    umis = set()
+    read_count = 0
+
+    with open(R1) as o_file:
+        for line_i, line in enumerate(o_file):
+            if line_i % 4 == 1:
+                umi = line[0:umi_len]
+                umis.add(umi)
+
+                read_count += 1
+
+    return len(umis), read_count
+
 def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta, disable_header_correction):
     # Ensure R1, R2, fasta exist
     for fl in (R1, R2, fasta):
@@ -158,10 +173,18 @@ def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta,
     except FileExistsError:
         raise FileExistsError(f"Filename: {temp} already exists. Please either delete this file or submit a different temp file name via --temp.")
 
+    # Give user insight into raw UMI counts present in their R1 file
+    raw_umi_count, raw_read_count = calc_raw_umi_counts(R1, umi_len)
+    print("++++++++++++++++++++++++++++++", flush = True)
+    print("Running deduplication pipeline", flush = True)
+    print("++++++++++++++++++++++++++++++", flush = True)
+    print("Parsing submitted R1 for total number of raw UMIs--", flush = True)
+    print(f"The {raw_read_count} unprocessed R1 reads contain {raw_umi_count} UMIs of length {umi_len}\n", flush = True)
+
     # Naming all temp files
     prefix = temp + "/" + output_prefix
     #gene_name = fasta.split(".")[0].split("/")[-1]
-    gene_name = fasta.split(".")[0]
+    gene_name = os.path.basename(fasta).split(".")[0]
 
     bowtie_sam = prefix + ".sam"
     bowtie_bam = prefix + ".bam"

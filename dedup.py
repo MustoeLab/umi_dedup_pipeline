@@ -16,9 +16,14 @@ def extract_umis(umi_len, R1, R2, read1umi, read2umi):
     cmd = "umi_tools extract "
     cmd += f"-p {umi} "
     cmd += f"-I {R1} "
-    cmd += f"--read2-in={R2} "
+
+    if R2:
+        cmd += f"--read2-in={R2} "
+
     cmd += f"-S {read1umi} "
-    cmd += f"--read2-out={read2umi}"
+
+    if R2:
+        cmd += f"--read2-out={read2umi}"
 
     return cmd
 
@@ -34,10 +39,18 @@ def align_reads(gene_name, p, R1, R2, output):
     cmd += "--maxins 800 "
     cmd += "--ignore-quals "
     cmd += "--no-unal "
-    cmd += "--no-mixed "
+
+    if R2:
+        cmd += "--no-mixed "
+
     cmd += f"-x {gene_name} "
-    cmd += f"-1 {R1} "
-    cmd += f"-2 {R2} "
+
+    if R2:
+        cmd += f"-1 {R1} "
+        cmd += f"-2 {R2} "
+    else:
+        cmd += f"-U {R1} "
+
     cmd += f"-S {output}"
 
     return cmd
@@ -69,13 +82,14 @@ def index_bam(bam):
 
     return cmd
 
-def collapse_umi(bam, dedup):
+def collapse_umi(bam, dedup, R2):
     cmd = "umicollapse "
     cmd += "bam "
     cmd += "-p .05 "
     cmd += f"-i {bam} "
     cmd += f"-o {dedup} "
-    cmd += "--paired"
+    if R2:
+        cmd += "--paired"
 
     return cmd
 
@@ -161,10 +175,31 @@ def calc_raw_umi_counts(R1, umi_len):
 
     return len(umis), read_count
 
+# Simple function to figure out number of UMIs remaining after alignment
+# useful for eyeballing if deduplciation is running properly
+def count_sam_umis(bowtie_sam, bowtie_sam_fastq, R2):
+    cmd = "samtools fastq "
+    cmd += bowtie_sam
+    cmd += " > "
+    cmd += bowtie_sam_fastq
+
+    cmd += " && "
+
+    cmd += "python "
+    cmd += "/".join(os.path.abspath(__file__).split("/")[:-1]) + "/" + "extracted_barcode_counter.py "
+    cmd += bowtie_sam_fastq
+    cmd += " "
+    if R2 is None:
+        cmd += " False"
+    else:
+        cmd += " True"
+
+    return cmd
+
 def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta, disable_header_correction):
     # Ensure R1, R2, fasta exist
     for fl in (R1, R2, fasta):
-        if not os.path.exists(fl):
+        if ( fl is not None ) and ( not os.path.exists(fl) ):
             raise ValueError(f"File: {fl} not found.")
 
     # Ensure temp file doesn't exist
@@ -201,6 +236,11 @@ def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta,
     final_out_1 = output_prefix + "_R1.fastq"
     final_out_2 = output_prefix + "_R2.fastq"
 
+    if not R2: # Simple way to ensure all of the functions engage non_R2 functionality
+        read2umi = None
+        pre_final_out_2 = None
+        final_out_2 = None
+
     # Generate all commands to run
     cmds = []
     if index_fasta:
@@ -211,24 +251,33 @@ def main(R1, R2, fasta, umi_len, output_prefix, temp, keep_temp, p, index_fasta,
 
     cmds += [extract_umis(umi_len, R1, R2, read1umi, read2umi)]
     cmds += [align_reads(gene_name, p, read1umi, read2umi, bowtie_sam)]
+    cmds += [count_sam_umis(bowtie_sam, bowtie_sam + ".fastq", R2)]
     cmds += [sam_to_bam(bowtie_sam, bowtie_bam)]
     cmds += [sort_bam(bowtie_bam, bowtie_bam2)]
     cmds += [index_bam(bowtie_bam2)] 
-    cmds += [collapse_umi(bowtie_bam2, dedup)]
+    cmds += [collapse_umi(bowtie_bam2, dedup, R2)]
     cmds += [sort_bam(dedup, dedup_by_name, by_name = True)]
     cmds += [bam_to_fastq(dedup_by_name, interleaved)]
-    cmds += [deinterleave_fastq(interleaved, pre_final_out_1, pre_final_out_2)]
+
+    # These R2 exceptions can likely be binned in a cleaner way, but this is a relatively simple
+    # pipeline so the ROI isn't super amazing.
+    if R2:
+        cmds += [deinterleave_fastq(interleaved, pre_final_out_1, pre_final_out_2)]
+    else:
+        pre_final_out_1 = interleaved
 
     # Prevent header trimming fix.
     # Necessary to reproduce old results
     # produced prior to patch.
     if disable_header_correction:
         cmds += [copy(pre_final_out_1, final_out_1)]
-        cmds += [copy(pre_final_out_2, final_out_2)]
+        if R2:
+            cmds += [copy(pre_final_out_2, final_out_2)]
 
     else:
         cmds += [trim_header(pre_final_out_1, final_out_1)]
-        cmds += [trim_header(pre_final_out_2, final_out_2)]
+        if R2:
+            cmds += [trim_header(pre_final_out_2, final_out_2)]
 
     # Run all cmds
     run_commands(cmds)
@@ -261,7 +310,7 @@ if __name__ == "__main__":
     # Parse all arguments
     ap = argparse.ArgumentParser()
     ap.add_argument("--R1", help = "Read 1 fastq. Contains umis. (Required)", required = True)
-    ap.add_argument("--R2", help = "Read 2 fastq. (Required)", required = True)
+    ap.add_argument("--R2", help = "Read 2 fastq. If left blank, R1 only functionality will be used.", default = None)
     ap.add_argument("--fasta", help = "Fasta for aligning reads. Must be bowtie indexed. (Required)", required = True)
     ap.add_argument("--umi_len", type = int, default = 12, help = "Umi length. (default = 12)")
     ap.add_argument("--output_prefix", default="dedup", help = "Name of the output file. (default = dedup)")
